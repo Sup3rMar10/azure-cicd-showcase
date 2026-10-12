@@ -1,7 +1,6 @@
 import logging
 import os
 import time
-from typing import Dict
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -26,7 +25,7 @@ class Invoice(InvoiceIn):
 
 
 # In-memory store keeps the demo cheap; swap for Azure SQL / Cosmos DB in a real system.
-_invoices: Dict[int, Invoice] = {}
+_invoices: dict[int, Invoice] = {}
 _next_id = 1
 
 
