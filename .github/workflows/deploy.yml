@@ -16,6 +16,11 @@ concurrency:
 jobs:
   ci:
     uses: ./.github/workflows/ci.yml
+    # A called workflow can't be granted more than its caller allows. ci.yml's PR-only plan job
+    # needs id-token, and GitHub validates that statically even though the job is skipped here.
+    permissions:
+      id-token: write
+      contents: read
 
   deploy:
     name: Build, push, apply, smoke test
