@@ -1,0 +1,84 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-prod # never run two applies against the same state at once
+  cancel-in-progress: false
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    name: Build, push, apply, smoke test
+    needs: ci
+    runs-on: ubuntu-latest
+    environment: prod # configure required reviewers on this environment for a manual approval gate
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_resource_group_name: ${{ vars.APP_RG }}
+      TF_VAR_image_tag: ${{ github.sha }}
+      # Optional: set a repo variable ALERT_EMAIL to enable the 5xx alert.
+      TF_VAR_alert_email: ${{ vars.ALERT_EMAIL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false # so `terraform output -raw` returns clean text
+
+      - name: Terraform init
+        working-directory: infra
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ vars.TF_STATE_RG }}" \
+            -backend-config="storage_account_name=${{ vars.TF_STATE_SA }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=invoice-prod.tfstate"
+
+      # Chicken-and-egg: the image must be in ACR before the Container App can reference it.
+      # Targeted apply is idempotent and only ever touches the registry.
+      - name: Ensure registry exists
+        working-directory: infra
+        run: terraform apply -auto-approve -input=false -target=azurerm_container_registry.acr
+
+      - name: Build and push image
+        run: |
+          ACR_NAME=$(terraform -chdir=infra output -raw acr_name)
+          ACR_SERVER=$(terraform -chdir=infra output -raw acr_login_server)
+          az acr login --name "$ACR_NAME"
+          IMAGE="$ACR_SERVER/invoice:${{ github.sha }}"
+          docker build --build-arg APP_VERSION=${{ github.sha }} -t "$IMAGE" app
+          docker push "$IMAGE"
+
+      - name: Terraform apply (full stack)
+        working-directory: infra
+        run: terraform apply -auto-approve -input=false
+
+      - name: Smoke test
+        run: |
+          URL=$(terraform -chdir=infra output -raw app_url)
+          echo "Testing $URL"
+          # scale-to-zero means the first request is a cold start, so retry generously
+          curl --fail --silent --show-error --retry 12 --retry-delay 5 --retry-all-errors "$URL/health" | tee health.json
+          grep -q "${{ github.sha }}" health.json || { echo "Deployed version does not match commit"; exit 1; }
+          echo "### Deployed ${{ github.sha }} to $URL" >> "$GITHUB_STEP_SUMMARY"

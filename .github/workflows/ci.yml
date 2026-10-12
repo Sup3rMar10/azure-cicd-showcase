@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  pull_request:
+  workflow_call: # reused by deploy.yml so main is gated by the exact same checks
+
+permissions:
+  contents: read
+
+jobs:
+  app:
+    name: Lint, test, build, scan
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: app/requirements-dev.txt
+
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check .
+      - run: pytest -q
+
+      - name: Build image
+        run: docker build -t invoice-api:ci .
+
+      - name: Scan image for vulnerabilities (Trivy)
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: invoice-api:ci
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: "1"
+
+  terraform-validate:
+    name: Terraform fmt + validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive
+        working-directory: infra
+      - run: terraform init -backend=false
+        working-directory: infra
+      - run: terraform validate
+        working-directory: infra
+
+  iac-security:
+    name: IaC misconfiguration scan (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: infra
+          severity: CRITICAL,HIGH
+          exit-code: "1"
+
+  plan:
+    name: Terraform plan (PR only)
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write # OIDC: GitHub mints a short-lived token, Azure trusts it. No stored secrets.
+      contents: read
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      TF_VAR_resource_group_name: ${{ vars.APP_RG }}
+      TF_VAR_image_tag: plan # never pulled at plan time
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - name: Init
+        working-directory: infra
+        run: |
+          terraform init \
+            -backend-config="resource_group_name=${{ vars.TF_STATE_RG }}" \
+            -backend-config="storage_account_name=${{ vars.TF_STATE_SA }}" \
+            -backend-config="container_name=tfstate" \
+            -backend-config="key=invoice-prod.tfstate"
+      - name: Plan
+        working-directory: infra
+        run: |
+          # -lock=false: a PR plan must never block a real deploy
+          terraform plan -no-color -lock=false -input=false | tee plan.txt
+          { echo '### Terraform plan'; echo '```'; tail -n 200 plan.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
