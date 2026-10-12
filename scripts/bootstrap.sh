@@ -20,6 +20,11 @@ TENANT_ID="$(az account show --query tenantId -o tsv)"
 SUFFIX="$(echo -n "$SUB_ID" | sha1sum | cut -c1-6)"
 STATE_SA="sttfstate${SUFFIX}"
 
+echo ">> Registering resource providers (no-op if already registered)"
+for ns in Microsoft.App Microsoft.ContainerRegistry Microsoft.OperationalInsights Microsoft.Insights Microsoft.Storage; do
+  az provider register --namespace "$ns" --wait -o none
+done
+
 echo ">> Resource groups"
 az group create -n "$APP_RG" -l "$LOCATION" -o none
 az group create -n "$STATE_RG" -l "$LOCATION" -o none
@@ -28,7 +33,8 @@ echo ">> Terraform state storage ($STATE_SA)"
 az storage account create -n "$STATE_SA" -g "$STATE_RG" -l "$LOCATION" \
   --sku Standard_LRS --min-tls-version TLS1_2 --allow-blob-public-access false \
   --allow-shared-key-access false -o none
-az storage container create -n tfstate --account-name "$STATE_SA" --auth-mode login -o none 2>/dev/null || true
+# Management-plane call: works without data-plane blob rights (shared keys are disabled on this account).
+az storage container-rm create --storage-account "$STATE_SA" -g "$STATE_RG" -n tfstate -o none
 STATE_SA_ID="$(az storage account show -n "$STATE_SA" -g "$STATE_RG" --query id -o tsv)"
 
 echo ">> Entra app registration for GitHub OIDC"

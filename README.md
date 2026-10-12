@@ -50,6 +50,8 @@ scripts/    bootstrap.sh (one-time setup), teardown.sh
 
 ## Run it yourself
 
+Full step-by-step guide with troubleshooting: [read.md](read.md).
+
 Prereqs: Azure subscription, `az`, `gh`, a GitHub repo for this code.
 
 ```bash
