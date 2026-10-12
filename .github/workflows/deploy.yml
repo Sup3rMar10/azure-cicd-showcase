@@ -1,8 +1,9 @@
 name: Deploy
 
 on:
-  push:
-    branches: [main]
+  # Manual-only until Azure is bootstrapped (see read.md). To deploy on every merge, re-add:
+  #   push:
+  #     branches: [main]
   workflow_dispatch:
 
 permissions:

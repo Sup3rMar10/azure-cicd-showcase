@@ -65,7 +65,7 @@ jobs:
 
   plan:
     name: Terraform plan (PR only)
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && vars.AZURE_CLIENT_ID != ''
     runs-on: ubuntu-latest
     permissions:
       id-token: write # OIDC: GitHub mints a short-lived token, Azure trusts it. No stored secrets.

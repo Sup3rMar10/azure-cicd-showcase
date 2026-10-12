@@ -94,9 +94,11 @@ gh variable set ALERT_EMAIL -b "you@example.com"
 ## 5. Run the pipeline
 
 ```bash
-git push origin main                  # or: gh workflow run Deploy
+gh workflow run Deploy                # the workflow is manual-only by default
 gh run watch                          # live progress in the terminal
 ```
+
+To deploy automatically on every merge to `main`, re-add the `push` trigger shown in the comment at the top of `.github/workflows/deploy.yml`.
 
 What happens:
 

@@ -58,7 +58,7 @@ Prereqs: Azure subscription, `az`, `gh`, a GitHub repo for this code.
 az login
 ./scripts/bootstrap.sh <your-github-user>/azure-cicd-showcase   # state storage, OIDC identity, repo variables
 # In GitHub: Settings > Environments > New environment "prod" (optionally add required reviewers)
-git push origin main                                           # triggers the pipeline
+gh workflow run Deploy                                         # deploy is manual-only; see read.md to auto-deploy on merge
 ```
 
 Local app only:
